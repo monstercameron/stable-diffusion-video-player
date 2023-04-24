@@ -101,6 +101,7 @@ class Toplevel1(tk.Tk):
         self.TButton1.configure(takefocus="")
         self.TButton1.configure(text='''Make Video''')
         self.TButton1.configure(compound='left')
+        self.TButton1.configure(command=self.test)
         self.TButton2 = ttk.Button(self.top)
         self.TButton2.place(relx=0.023, rely=0.583, height=45, width=176)
         self.TButton2.configure(takefocus="")
@@ -128,6 +129,7 @@ class Toplevel1(tk.Tk):
         self.Scale1.configure(length="216")
         self.Scale1.configure(orient="horizontal")
         self.Scale1.configure(troughcolor="#d9d9d9")
+        self.Scale1.set(0.75)
         self.Scale2 = tk.Scale(self.top, from_=1.0, to=10.0, resolution=0.5)
         self.Scale2.place(relx=0.008, rely=0.125,
                           relheight=0.058, relwidth=0.17)
@@ -139,7 +141,8 @@ class Toplevel1(tk.Tk):
         self.Scale2.configure(length="216")
         self.Scale2.configure(orient="horizontal")
         self.Scale2.configure(troughcolor="#d9d9d9")
-        self.Scale3 = tk.Scale(self.top, from_=0.0, to=1.0, resolution=0.05)
+        self.Scale2.set(1.5)
+        self.Scale3 = tk.Scale(self.top, from_=1, to=150, resolution=1)
         self.Scale3.place(relx=0.008, rely=0.222,
                           relheight=0.058, relwidth=0.17)
         self.Scale3.configure(activebackground="beige")
@@ -150,6 +153,7 @@ class Toplevel1(tk.Tk):
         self.Scale3.configure(length="218")
         self.Scale3.configure(orient="horizontal")
         self.Scale3.configure(troughcolor="#d9d9d9")
+        self.Scale3.set(10)
         self.Label2 = tk.Label(self.top)
         self.Label2.place(relx=0.016, rely=0.181, height=21, width=126)
         self.Label2.configure(activebackground="#f9f9f9")
@@ -173,6 +177,9 @@ class Toplevel1(tk.Tk):
         self.Label3.configure(highlightcolor="black")
         self.Label3.configure(text='''Num Inference Steps''')
 
+    def test(self):
+        print('hellow world')
+
     def main(*args):
         '''Main entry point for the application.'''
         global root
@@ -182,8 +189,21 @@ class Toplevel1(tk.Tk):
         global _top1, _w1
         _top1 = root
         _w1 = Toplevel1(_top1)
+        sys.stdout = MessageStream(_w1.Message1)
         root.mainloop()
 
+
+class MessageStream:
+    def __init__(self, message_widget):
+        self.message_widget = message_widget
+
+    def write(self, message):
+        self.message_widget.configure(text=message)
+        # self.message_widget.configure(text=self.message_widget.cget("text") + f'\n{message}')
+
+
+    def flush(self):
+            pass
 
 if __name__ == '__main__':
     Toplevel1.main()
