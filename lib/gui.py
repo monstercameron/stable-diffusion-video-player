@@ -9,6 +9,12 @@ from tkinter.constants import *
 import tkinter.ttk as ttk
 import tkinter as tk
 import sys
+import os
+import queue
+import imageio
+import shutil
+import threading
+from PIL import Image, ImageTk
 _script = sys.argv[0]
 _location = os.path.dirname(_script)
 # import  #autosave_support
@@ -45,7 +51,26 @@ def _style_code():
 
 
 class Toplevel1(tk.Tk):
-    def __init__(self, top=None):
+    def __init__(self, video_path, ImageGenerator, BashScriptRunner,
+                 top=None, FRAMES=None, OUTPUT=None,
+                 MODEL=None, SCRIPT=None, OUTPUTVIDEOS=None, VIDEO=None):
+        '''video player configs'''
+        self.video_path = video_path
+        self.video = imageio.get_reader(self.video_path)
+        # self.image_generator = ImageGenerator(FRAMES, OUTPUT, MODEL)
+        self.bashscript_runner = BashScriptRunner(SCRIPT)
+        self.frame_gen = self.video.iter_data()
+        self.total_frames = self.video.get_length()
+        self.current_frame = 0
+        self.reset_paths = [FRAMES, OUTPUT, OUTPUTVIDEOS]
+        self.frame_queue = queue.Queue()
+        self.FRAMES = FRAMES
+        self.OUTPUT = OUTPUT
+        self.MODEL = MODEL
+        self.SCRIPT = SCRIPT
+        self.VIDEO = VIDEO
+        self.OUTPUTVIDEOS = OUTPUTVIDEOS
+
         '''This class configures and populates the toplevel window.
         top is the toplevel containing window.'''
         top.geometry("1280x720+433+121")
@@ -62,7 +87,7 @@ class Toplevel1(tk.Tk):
         self.TProgressbar1.place(relx=0.008, rely=0.736,
                                  relwidth=0.978, relheight=0.0, height=22)
         self.TProgressbar1.configure(length="1252")
-        self.TProgressbar1.configure(value='50')
+        self.TProgressbar1.configure(value='1')
         self.Message1 = tk.Message(self.top)
         self.Message1.place(relx=0.0, rely=0.778,
                             relheight=0.221, relwidth=1.0)
@@ -101,12 +126,13 @@ class Toplevel1(tk.Tk):
         self.TButton1.configure(takefocus="")
         self.TButton1.configure(text='''Make Video''')
         self.TButton1.configure(compound='left')
-        self.TButton1.configure(command=self.test)
+        self.TButton1.configure(command=self.make_video)
         self.TButton2 = ttk.Button(self.top)
         self.TButton2.place(relx=0.023, rely=0.583, height=45, width=176)
         self.TButton2.configure(takefocus="")
         self.TButton2.configure(text='''Start Video''')
         self.TButton2.configure(compound='left')
+        self.TButton2.configure(command=self.update_frame)
         self.Label1 = tk.Label(self.top)
         self.Label1.place(relx=0.016, rely=0.069, height=41, width=86)
         self.Label1.configure(activebackground="#f9f9f9")
@@ -177,6 +203,111 @@ class Toplevel1(tk.Tk):
         self.Label3.configure(highlightcolor="black")
         self.Label3.configure(text='''Num Inference Steps''')
 
+        self.worker_thread = threading.Thread(
+            target=self.save_frames_worker, daemon=True)
+        self.worker_thread.start()
+
+    def reset_frames(self):
+        for folders in self.reset_paths:
+            if os.path.exists(folders):
+                shutil.rmtree(folders)
+            os.makedirs(folders)
+
+    def update_frame(self):
+        try:
+            frame = next(self.frame_gen)
+            self.current_frame += 1
+        except StopIteration:
+            # End of video, loop the video.
+            self.frame_gen = self.video.iter_data()
+            self.current_frame = 0
+            self.update_frame()
+            return
+
+        # Determine the size of the square crop.
+        height, width, _ = frame.shape
+        crop_size = min(height, width)
+
+        # Calculate the starting position for the crop.
+        start_x = (width - crop_size) // 2
+        start_y = (height - crop_size) // 2
+
+        # Crop the frame to a square.
+        frame = frame[start_y:start_y + crop_size, start_x:start_x + crop_size]
+
+        # Resize the cropped frame to 512x512 pixels.
+        frame = Image.fromarray(frame).resize((512, 512))
+
+        # Put the frame into the queue to be saved by the worker thread.
+        self.frame_queue.put((self.current_frame, frame))
+
+        # Convert the frame to a PhotoImage for display in Tkinter.
+        image = ImageTk.PhotoImage(frame)
+
+        # Update the label widget with the current frame.
+        # self.Canvas1.config(image=image)
+        # self.Canvas1.image = image
+        self.Canvas1.create_image(0, 0, anchor=tk.NW, image=image)
+
+        # Update the progress bar.
+        self.TProgressbar1.configure(value=self.current_frame)
+
+
+        # Update the window title with the current frame and total frames.
+        self.title(
+            f"Frame --> Stable Diffusion --> Frame: {self.current_frame} / {self.total_frames}")
+
+        # Schedule the next frame update.
+        self.after(20, self.update_frame)
+
+    def save_frames_worker(self):
+        while True:
+            frame_number, frame = self.frame_queue.get()
+            frame_file_path = os.path.join(
+                self.FRAMES, f'frame{frame_number:04d}.png')
+            imageio.imwrite(frame_file_path, frame)
+            self.image_generator.generate_image(
+                f'frame{frame_number:04d}.png', self.text_var.get(),
+                strength=self.strength_var.get(),
+                guidance_scale=self.guidance_var.get(),
+                num_inference_steps=self.steps_var.get())
+            # t = threading.Thread(target=self.generate_image_thread,
+            #                      args=(frame_number,))
+            # # Start the thread
+            # t.start()
+
+            # Get the latest image from the output folder.
+            output_image_path = os.path.join(
+                self.OUTPUT, f'frame{frame_number:04d}.png')
+            if os.path.exists(output_image_path):
+                output_image = Image.open(output_image_path)
+                # output_image = output_image.resize((512, 512))
+                output_image = ImageTk.PhotoImage(output_image)
+                self.panel2.config(image=output_image)
+                self.panel2.image = output_image
+
+    def on_closing(self):
+        self.video.close()
+        self.destroy()
+
+    def make_video(self):
+        output = self.bashscript_runner.run_script()
+        print(output)
+
+    def delete_output_files(self, dir_path):
+        files = os.listdir(dir_path)
+        for file in files:
+            file_path = os.path.join(dir_path, file)
+            os.remove(file_path)
+
+    def generate_image_thread(self, frame_number):
+        self.image_generator.generate_image(
+            f'frame{frame_number:04d}.png',
+            self.text_var.get(),
+            strength=self.strength_var.get(),
+            guidance_scale=self.guidance_var.get(),
+            num_inference_steps=self.steps_var.get())
+
     def test(self):
         print('hellow world')
 
@@ -189,6 +320,7 @@ class Toplevel1(tk.Tk):
         global _top1, _w1
         _top1 = root
         _w1 = Toplevel1(_top1)
+        _w1.reset_paths()
         sys.stdout = MessageStream(_w1.Message1)
         root.mainloop()
 
@@ -199,11 +331,10 @@ class MessageStream:
 
     def write(self, message):
         self.message_widget.configure(text=message)
-        # self.message_widget.configure(text=self.message_widget.cget("text") + f'\n{message}')
-
 
     def flush(self):
-            pass
+        pass
+
 
 if __name__ == '__main__':
     Toplevel1.main()
